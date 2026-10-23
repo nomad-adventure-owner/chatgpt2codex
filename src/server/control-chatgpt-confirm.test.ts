@@ -277,6 +277,30 @@ describe("computer_request_action immediate execution (CHATGPT2CODEX_CONTROL_CHA
     expect(events.some((e) => e.type === "control.bridge.rejected")).toBe(true);
   });
 
+  it("does not let a remote project selection replace an active local control lease", async () => {
+    process.env.CHATGPT2CODEX_CONTROL_CHATGPT = "1";
+    const { ctx, events } = makeCtx(stateDir, projectRoot, { remote: true });
+    const expiresAt = Date.now() + 60_000;
+    await ctx.store.setSession({
+      activeProjectId: "proj",
+      mode: "read",
+      lease: { projectId: "proj", leaseId: "local-control", preset: "control", expiresAt },
+    });
+    const tools = await registeredTools(ctx);
+
+    const result = await tools.project_select?.handler?.({
+      projectId: "proj",
+      reason: "remote automatic selection",
+      preset: "tests-only",
+    });
+
+    expect(result?.isError).toBe(true);
+    expect(result?.structuredContent?.code).toBe("PERMISSION_DENIED");
+    const session = (await ctx.store.getSession()) as { lease?: { preset?: string } | null } | null;
+    expect(session?.lease?.preset).toBe("control");
+    expect(events.some((e) => e.type === "control.remote_selection_blocked")).toBe(true);
+  });
+
   it("caps how many actions can auto-execute in exposed mode, falling back to pending (local approval) once the rate limit is hit", async () => {
     // The server has no way to verify that each ChatGPT Confirm/Deny prompt
     // is a distinct, deliberate human tap rather than an auto-approve

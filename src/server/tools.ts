@@ -1311,6 +1311,26 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
 
         const session = await loadSession(ctx);
         if (
+          ctx.remote &&
+          session.lease?.preset === "control" &&
+          Date.now() <= session.lease.expiresAt
+        ) {
+          // A remote peer may use a locally armed control lease, but must not
+          // be able to replace it with an ordinary project selection. This
+          // also prevents automatic project selection in a concurrent remote
+          // chat from disarming a time-bounded owner-approved control session.
+          await ctx.ledger.append({
+            type: "control.remote_selection_blocked",
+            activeProjectId: session.activeProjectId,
+            requestedProjectId: entry.projectId,
+          }).catch(() => undefined);
+          throw new DomainError(
+            ErrorCode.PERMISSION_DENIED,
+            "A local control lease is active and cannot be replaced remotely; use the active control session or wait for it to expire.",
+            { activeProjectId: session.activeProjectId, preset: "control", expiresAt: session.lease.expiresAt },
+          );
+        }
+        if (
           session.activeProjectId &&
           session.activeProjectId !== entry.projectId &&
           session.lease &&

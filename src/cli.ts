@@ -19,7 +19,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { Config, LeasePreset, ProjectRegistryEntry, ToolContext } from "./types.js";
 import { findProject, scanWorkspace } from "./workspace/registry.js";
 import { makeLease } from "./workspace/project-select.js";
-import { Store } from "./state/store.js";
+import { Store, type SessionDocument } from "./state/store.js";
 import { Ledger } from "./state/ledger.js";
 import { createServer } from "./server/mcp-server.js";
 import { createHttpServer, defaultHttpServerConfig } from "./server/http.js";
@@ -139,6 +139,16 @@ async function applyStartupProjectSelection(ctx: ToolContext, flags: Record<stri
       `Startup active project not found: ${activeProjectRoot ?? activeProject}. ` +
         `Make sure --workspace points at that project folder or its workspace root.`,
     );
+  }
+
+  // A control lease can only be armed locally and must stay armed for its
+  // bounded lifetime. The desktop launcher supplies a default startup preset
+  // on every HTTP-server restart; without this guard that default would
+  // silently replace a still-valid local control grant before a remote
+  // client can use it.
+  const current = (await ctx.store.getSession()) as SessionDocument | null;
+  if (current?.lease?.preset === "control" && Date.now() <= current.lease.expiresAt) {
+    return;
   }
 
   const preset = parseLeasePreset(flags["active-project-preset"]);
